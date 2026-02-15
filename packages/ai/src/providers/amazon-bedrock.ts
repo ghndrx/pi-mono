@@ -437,6 +437,24 @@ function supportsThinkingSignature(model: Model<"bedrock-converse-stream">): boo
 	return id.includes("anthropic.claude") || id.includes("anthropic/claude");
 }
 
+/**
+ * Check if the model supports reasoningContent blocks in Bedrock Converse API.
+ * Models that support reasoning/thinking in Bedrock:
+ * - Anthropic Claude (all versions)
+ * - DeepSeek R1/V3 (native reasoning)
+ * 
+ * Models that do NOT support reasoningContent (will fail with validation errors):
+ * - Kimi K2.5, GLM 4.7, Qwen, Mistral, etc.
+ */
+function supportsReasoningContent(model: Model<"bedrock-converse-stream">): boolean {
+	const id = model.id.toLowerCase();
+	return (
+		id.includes("anthropic.claude") || 
+		id.includes("anthropic/claude") ||
+		id.includes("deepseek")
+	);
+}
+
 function buildSystemPrompt(
 	systemPrompt: string | undefined,
 	model: Model<"bedrock-converse-stream">,
@@ -513,21 +531,26 @@ function convertMessages(
 						case "thinking":
 							// Skip empty thinking blocks
 							if (c.thinking.trim().length === 0) continue;
-							// Only Anthropic models support the signature field in reasoningText.
-							// For other models, we omit the signature to avoid errors like:
-							// "This model doesn't support the reasoningContent.reasoningText.signature field"
-							if (supportsThinkingSignature(model)) {
-								contentBlocks.push({
-									reasoningContent: {
-										reasoningText: { text: sanitizeSurrogates(c.thinking), signature: c.thinkingSignature },
-									},
-								});
+							// Only Anthropic models support reasoningContent in Bedrock Converse API.
+							// For other models (Kimi, GLM, etc.), convert thinking to text blocks.
+							if (supportsReasoningContent(model)) {
+								// Anthropic models support reasoningContent
+								if (supportsThinkingSignature(model)) {
+									contentBlocks.push({
+										reasoningContent: {
+											reasoningText: { text: sanitizeSurrogates(c.thinking), signature: c.thinkingSignature },
+										},
+									});
+								} else {
+									contentBlocks.push({
+										reasoningContent: {
+											reasoningText: { text: sanitizeSurrogates(c.thinking) },
+										},
+									});
+								}
 							} else {
-								contentBlocks.push({
-									reasoningContent: {
-										reasoningText: { text: sanitizeSurrogates(c.thinking) },
-									},
-								});
+								// Non-Anthropic models: convert thinking to text
+								contentBlocks.push({ text: sanitizeSurrogates(`<thinking>\n${c.thinking}\n</thinking>`) });
 							}
 							break;
 						default:
